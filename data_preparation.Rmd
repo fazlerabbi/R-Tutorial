@@ -1,0 +1,89 @@
+---
+title: "Data Preparation"
+author: "Fazle Rabbi"
+date: "October 21, 2015"
+output: html_document
+---
+
+We now begin with the task of preparing our data for building models using R.
+
+The required packages for this tutorial:
+```{r}
+library(rattle)                       # the weather dataset and normVarNames()
+library(randomForest)                 # Input missing values using na. roughfix()
+library(tidyr)                        # Tidy the dataset
+library(ggplot2)                      # Visualize data
+library(dplyr)                        # data preparation and pipes %>%
+library(lubridate)                    # handle dates
+library(FSelector)                    # feature selection
+```
+
+We begin by noting the path to the CSV file we wish to load
+```{r}
+dspath <- "http://rattle.togaware.com/weather.csv"
+weather <- read.csv(dspath)
+dsname <- "weather"
+ds <- get(dsname)                # generic name
+```
+
+Once it is loaded we might like to get a basic idea of what it looks like
+```{r}
+dim(ds)
+names(ds)
+str(ds)
+```
+
+## Step 1: Convenience of Table Data Frame
+Another tip in dealing with larger datasets is to make use of tbl df() to add a couple of extra
+classes to the data frame. The simple aim here is to avoid the often made “mistake” of printing
+the whole data frame accidentally.
+
+```{r}
+class(ds)
+ds <- tbl_df(ds)
+class(ds)
+```
+
+The default print() method reports the dimensions and then the first few rows and columns.
+```{r}
+ds
+```
+
+## Step 2: Review - Observations
+```{r}
+head(ds)
+tail(ds)
+ds[sample(nrow(ds),6),]    # sample creates random indices here (6 indices)
+```
+
+## Step 2: Review - Structure
+```{r}
+str(ds)
+```
+
+## Step 2: Review - Summay
+The first quartile (Q1) is defined as the middle number between the smallest number and the median of the data set. 
+
+```{r}
+summary(ds)
+```
+
+## Step 2: Review - Meta Data Cleansing
+**Normalize variable names**:  R is case sensitive. normVarNames() from rattle, converts variables into a standard form.
+```{r}
+names(ds) <- normVarNames(names(ds))
+names(ds)
+```
+
+
+
+
+
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
