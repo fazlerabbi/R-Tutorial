@@ -69,15 +69,307 @@ summary(ds)
 ```
 
 ## Step 2: Review - Meta Data Cleansing
-**Normalize variable names**:  R is case sensitive. normVarNames() from rattle, converts variables into a standard form.
+**Normalize variable names:**  R is case sensitive. normVarNames() from rattle, converts variables into a standard form.
 ```{r}
 names(ds) <- normVarNames(names(ds))
 names(ds)
 ```
 
+## Step 2: Review - Data Formats
+We might first check the data type of each variable.
+```{r}
+sapply(ds, class)
+```
 
+**Convert factor to date variable**
+We note that the date variable is a factor rather than a date. Thus we may like to convert it
+into a date using lubridate.
 
+```{r}
+library(lubridate)
+head(ds$date)
+ds$date <- ymd(as.character(ds$date))
+head(ds$date)
+sapply(ds, class)
+```
 
+## Step 2: Review - Variable Roles
+Identify the role played by each variable.
+1. date is not relevant. We can convert it to season.
+2. location can be removed. It is constant.
+3. risk is an output variable. It is a measure of the amount of risk or the importance of an observation with respect. Should not be used as input variable.
+
+```{r}
+(vars <- names(ds))
+target <- "rain_tomorrow"
+risk <- "risk_mm"
+id <- c("date", "location")
+```
+
+## Step 3: Clean - Ignore IDs, Outputs, Missing
+**IDs and Outputs:** We start with the identifiers and the risk variable (which is an output
+variable). These should play no role in the modelling.
+```{r}
+ignore <- union(id, if (exists("risk")) risk)
+```
+
+We might also identify any variable that has a unique value for every observation. These are
+sometimes identifiers as well and if so are candidates for ignoring.
+
+```{r}
+(ids <- which(sapply(ds, function(x) length(unique(x))) == nrow(ds)))
+ignore <- union(ignore, names(ids))
+```
+
+**All Missing:** We then remove any variables where all of the values are missing. 
+```{r}
+mvc <- sapply(ds[vars], function(x) sum(is.na(x)))
+mvc <- names(which(mvc == nrow(ds)))
+ignore <- union(ignore, mvc)
+```
+
+**Missing Many:** Maybe we want to ignore variables with more than 70% missing.
+```{r}
+mvn <- sapply(ds[vars], function(x) sum(is.na(x)))
+mvn <- names(which(mvn >= 0.7*nrow(ds)))
+ignore <- union(ignore, mvn)
+```
+
+## Step 3: Clean - Ignore MultiLevel, Constants
+**Too Many Levels:** We may want to ignore variables with too many levels.
+Another approach is to group the levels into a smaller number of levels.
+```{r}
+factors <- which(sapply(ds[vars], is.factor))
+lvls <- sapply(factors, function(x) length(levels(ds[[x]])))
+(many <- names(which(lvls > 20)))
+
+ignore <- union(ignore, many)
+```
+
+**Contants:** Ignore variables with constant values
+```{r}
+(constants <- names(which(sapply(ds[vars], function(x) all(x == x[1L])))))
+ignore <- union(ignore, constants)
+```
+
+## Step 3: Clean - Identify Correlated Variables
+Here we can identify pairs where we want to keep one but not the other, because they are highly
+correlated. We will select them manually since it is a judgement call. Normally we might limit
+the removals to those correlations that are 0.95 or more.
+
+```{r}
+library(dplyr)
+
+mc <- cor(ds[which(sapply(ds, is.numeric))], use="complete.obs")
+mc[upper.tri(mc, diag=TRUE)] <- NA
+mc <-
+    mc                              %>%
+    abs()                           %>%
+    data.frame()                    %>%
+    mutate(var1=row.names(mc))      %>%
+    gather(var2, cor, -var1)        %>%
+    na.omit()
+
+mc <- mc[order(-abs(mc$cor)),]
+mc
+```
+
+Here we identify the pairs and keep one but not the other. Remove correlated >= 0.95.
+```{r}
+ignore <- union(ignore, c("temp_3pm", "pressure_9am", "temp_9am"))
+
+```
+
+## Step 3: Clean - Remove the Variables
+Remove the ignorable variables
+```{r}
+length(vars)
+vars <- setdiff(vars, ignore)
+length(vars)
+
+```
+
+## Step 3: Clean - Feature Selection
+The FSelector package provides functions to identify the subset of variables that might be more effective for modeling.
+```{r}
+library(FSelector)                # information.gain()
+
+form <- formula(paste(target, "~ ."))
+cfs(form, ds[vars])
+information.gain(form, ds[vars])
+```
+
+## Step 3: Clean - Remove Missing Target
+  
+```{r}
+dim(ds)
+sum(is.na(ds[target]))
+ds <- ds[!is.na(ds[target]),]
+sum(is.na(ds[target]))
+dim(ds)
+```
+
+## Step 3: Clean - Deal with Missing Values
+Missing values for the variables are an issue for some but not all model builders. For example, randomForest() has not been coded to handle missing values whilst rpart() has a particularly well developed approach to dealing with missing values.
+
+Here we do this using na.roughfix() from randomForest just for demonstration. Not really doing it.
+```{r}
+ods <- ds
+dim(ds[vars])
+sum(is.na(ds[vars]))
+ds[vars] <- na.roughfix(ds[vars])
+sum(is.na(ds[vars]))
+dim(ds[vars])
+ds <- ods                     # restore the original
+
+```
+
+## Step 3: Clean - Omitting Observations
+We might want to simply remove observations that have missing values. Here na.omit() identifies the rows to omit based on the vars to be included for modeling.
+
+This list of rows to omit is stored as the na.action attribute of the returned object. We then remove these observations from the dataset.
+```{r}
+ods <- ds
+omit <- NULL
+
+dim(ds[vars])
+sum(is.na(ds[vars]))
+mo <- attr(na.omit(ds[vars]), "na.action")
+omit <- union(omit, mo)
+if (length(omit)) ds <- ds[-omit,]
+sum(is.na(ds[vars]))
+dim(ds[vars])
+
+ds <- ods
+```
+
+## Step 3: Clean - Normalise Factors
+Some variables will have levels with spaces, and mixture of cases, etc. We may like to normalise the levels for each of the categoric variables.
+```{r}
+factors <- which(sapply(ds[vars], is.factor))
+for(f in factors) {
+  levels(ds[[f]]) <- normVarNames(levels(ds[[f]]))
+}
+```
+
+## Step 3: Clean - Ensure Target is Categoric
+For classification models we want to ensure the target is categoric. Often it is 0/1 and hence is loaded as numeric.
+```{r}
+ds[target] <- as.factor(ds[[target]])
+table(ds[target])
+
+p <- ggplot(ds, aes_string(x=target))
+p <- p + geom_bar(width=0.2)
+print(p)
+```
+
+## Step 4: Prepare Variables
+We are now ready to identify the variables that we will use to build the model.
+
+```{r}
+inputc <- setdiff(vars, target)
+inputc
+```
+
+The indices are determined from the names of the variables in the original dataset. Not the use of USE.NAMES= to turn of the inclusion of names of the elements of the resulting vector, only to keep things simpler.
+
+```{r}
+inputi <- sapply(inputc, function(x) which(x == names(ds)), USE.NAMES=FALSE)
+
+inputi
+
+nobs <- nrow(ds)  # number of observations
+nobs
+```
+
+Reporting the dimensions
+```{r}
+dim(ds)
+dim(ds[vars])
+dim(ds[inputc])
+dim(ds[inputi])
+```
+
+## Step 4: Prepare - Numeric and Categoric Variables
+Sometimes we need to identify the numeric and categoric variables. Many cluster analysis algorithms only deal with numeric variables, for example.
+
+```{r}
+numi <- intersect(inputi, which(sapply(ds, is.numeric)))
+numi
+
+numc <- names(ds)[numi]
+numc
+
+cati <- intersect(inputi, which(sapply(ds, is.factor)))
+cati
+
+catc <- names(ds)[cati]
+catc
+```
+
+## Step 4: Prepare - Save DataSet
+For large datasets we may want to save it to a bianry RData file once we have it in the right shape.
+
+```{r}
+dsdate <- paste0("_", format(Sys.Date(), "%y%m%d"))
+dsrdata <- paste0(dsname, dsdate, ".RData")
+
+save(ds, dsname, dspath, dsdate, target, risk, id, ignore, vars,
+nobs, omit, inputi, inputc, numi, numc, cati, catc, file=dsrdata)
+```
+
+We would only do the above steps once, and then each time we wish to use the dataset, we would load() it into R.
+
+```{r}
+(load(dsrdata))
+dsname
+dspath
+dim(ds)
+id
+target
+risk
+ignore
+vars
+
+```
+
+### Using apply Family Functions
+**Using apply in R:**
+apply(X,MARGIN,FUN). X is an array or matrix. MARGIN=1, applies over rows. MARGIN=2, applies over columns.
+
+```
+X<-matrix(rnorm(30), nrow=5, ncol=6)
+apply(X,2,sum)  
+```
+![apply(x,2,sum)](http://blog.datacamp.com/wp-content/uploads/2015/07/Apply_function.png)
+
+**Using lapply in R:**
+lapply is a given function to every element of a list and obtain a list as result.
+
+```
+# create a list of matrices:
+A<-matrix(1:9, 3,3)
+B<-matrix(4:15, 4,3)
+C<-matrix(8:10, 3,2)
+MyList<-list(A,B,C) # display the list
+
+# extract the second column from the list of matrices, using the selection operator "["
+lapply(MyList,"[", , 2)
+```
+![lapply(MyList,"[",,2)](http://blog.datacamp.com/wp-content/uploads/2015/07/lapply.png)
+
+```
+# Another example: we now  extract the first row from the list of matrices, using the selection operator "["
+lapply(MyList,"[", 1, )
+```
+
+**Using sapply in R:**
+sapply works as lapply, but it tries to simplify the output to the most elementary data structure that is possible. sapply returns a vector.
+
+```
+sapply(MyList, "[", 2, 1 )
+## [1] 2 5 9
+```
 
 
 You can also embed plots, for example:
