@@ -1,0 +1,89 @@
+---
+title: "data_modeling"
+author: "Fazle Rabbi"
+date: "October 25, 2015"
+output: html_document
+---
+
+The packages that will be used for modeling are:
+
+```{r}
+library(rpart)          # Build decision tree model with rpart().
+library(randomForest)   # Build model with randomForest().
+library(ada)            # Build boosted trees model with ada().
+library(rattle)         # Display tree model with fancyRpartPlot().
+library(ROCR)           # Use prediction() for evaluation.
+library(party)          # Build conditional tree models with ctree() and cforest().
+library(ggplot2)        # Display evaluations.
+
+```
+
+## Step 4: Getting Started - Load the Dataset
+In data preparation we saved the weather dataset, load it.
+
+```{r}
+(load("weather_151025.RData"))
+dsname
+dspath
+dsdate
+dim(ds)
+id
+target
+risk
+ignore
+vars
+```
+
+
+## Step 4: Prepare - Formula to Describe the Goal
+Predict rain_tomorrow from all other variables.
+
+```{r}
+(form <- formula(paste(target, "~ .")))  # target based on all other variables
+```
+
+## Step 4: Prepare - Training and Testing Datasets
+Training, testing and validation datasets. First we initiate a random seed and report that seed so that the experiment can be repeated if necessary.
+
+```{r}
+(seed <- sample(1:1000000, 1))
+seed <- 123
+set.seed(seed)
+```
+
+Next we partition into training (70% random sample) and testing dataset.
+```{r}
+length(train <- sample(nobs, 0.7*nobs))
+length(test  <- setdiff(seq_len(nobs), train))
+```
+The error rate calculated on testing dataset is closer to what we will obtain in general when we use the model. We also record the actual outcomes and the risks.
+
+```{r}
+actual.train <- ds[train, target]
+actual <- ds[test, target]
+risks <- ds[test, risk]
+```
+
+## Step 5: Build - Decision Tree
+We build rpart() decision tree.
+
+```{r}
+ctrl <- rpart.control(maxdepth=3)
+system.time(model <- m.rp <- rpart(form, ds[train, vars], control=ctrl))
+model
+mtype <- "rpart" # Record the type of the model for later use.
+
+library(rpart.plot)
+library(RColorBrewer)
+
+fancyRpartPlot(model)
+```
+
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
