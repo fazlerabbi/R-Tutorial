@@ -79,11 +79,166 @@ library(RColorBrewer)
 fancyRpartPlot(model)
 ```
 
+## Step 6: Evaluate - Training Accuracy and AUC
+Use the model to predict the class of the observations of the training dataset.
 
-You can also embed plots, for example:
-
-```{r, echo=FALSE}
-plot(cars)
+```{r}
+head(cl <- predict(model, ds[train, vars], type="class"))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Then compare with the actual class of the training dataset.
+
+```{r}
+head(actual.train)
+```
+
+We can calculate the overall accuracy over the training dataset, as simply the sum of the number of times the prediction agrees with the actual class, divided by the size of the training dataset.
+
+```{r}
+(acc <- sum(cl == actual.train, na.rm=TRUE)/length(actual.train))
+(err <- sum(cl != actual.train, na.rm=TRUE)/length(actual.train))
+```
+
+The model has overall error rate of 10%.
+
+The area under the so-called ROC curve can also be calculated using ROCR.
+
+```{r}
+pr <- predict(model, ds[train, vars], type="prob")[,2]
+pred <- prediction(pr, ds[train, target])
+(atr <- attr(performance(pred, "auc"), "y.values")[[1]])
+
+```
+The area under the curve (AUC) is 79% of the total error.
+
+## Step 6: Evaluate - Training Accuracy and AUc
+As we have noted though, performing any evaluation on the training dataset provides a biased estimate of the actual performance. We must evaluate on testing dataset.
+
+```{r}
+cl <- predict(model, ds[test, vars], type="class")
+(acc <- sum(cl == actual, na.rm=TRUE)/length(actual))
+(err <- sum(cl != actual, na.rm=TRUE)/length(actual))
+
+```
+The overall accuracy is 84%.
+The overall error rate is 16%.
+
+```{r}
+pr <- predict(model, ds[test, vars], type="prob")[,2]
+pred <- prediction(pr, ds[test, target])
+(ate <- attr(performance(pred, "auc"), "y.values")[[1]])
+
+```
+The AUC is 68%.
+All of these performance measures are less than what we found on the trianing dataset, as we should expect.
+
+## Step 6: Evaluate - Confusion Matrix
+First for the training set.
+```{r}
+cl <- predict(model, ds[train, vars], type="class")
+round(100*table(actual.train, cl, dnn=c("Actual", "Predicted"))/length(actual.train))
+```
+
+Then for the testing set.
+```{r}
+cl <- predict(model, ds[test, vars], type="class")
+round(100*table(actual, cl, dnn=c("Actual", "Predicted"))/length(actual))
+
+```
+
+A **confusion matrix** is also called an error matrix or contingency table. The problem with calling them an error matrix is that not every cell in the table reports an error. The diagonals record the accuracy. Thus a quick look by a new data scientist might lead them to think the errors are high, based on the diagonals. The potential for this confusion is a good reason to call them something other than an error matrix.
+
+## Step 6: Evaluate - Risk Chart
+A risk chart is also known as an accumulative performance plot.
+
+```{r}
+riskchart(pr, ds[test, target], ds[test, risk])
+```
+
+## Step 7: Experiment - Framework
+We can repeat the modelling multiple times, randomly selecting different datasets for training, to get an estimate of the actual expected performance and variation we see in the performance.
+
+```{r}
+source("experi.R")
+
+n <- 10
+
+# Run with rpart
+ex.rp <- experi(form, ds[vars], dsname, target, "rpart", "1", n=n, keep=TRUE)
+
+# Run with randomForest
+ex.rf <- experi(form, ds[vars], dsname, target, "randomForest", "500", n=n, keep=TRUE,
+                control=list(na.action=na.omit))
+# Run with ada
+ex.ad <- experi(form, ds[vars], dsname, target, "ada", "50", n=n, keep=TRUE)
+
+# Run with ctree
+ex.ct <- experi(form, ds[vars], dsname, target, "ctree", "1", n=n, keep=TRUE)
+
+# Run with cforest
+# Generates: error code 1 from Lapack routine 'dgesdd'
+# ex.cf <- experi(form, ds[vars], dsname, target, "cforest", "500", n=n, keep=TRUE)
+
+# Do other also, lm, svm, C5.0, J48 etc.
+
+# Result
+results <- rbind(ex.rp, ex.rf, ex.ad, ex.ct)
+rownames(results) <- results$modeller
+results$modeller <- NULL
+results
+
+```
+
+
+## Step 7: Experiment - RiskChart Decision Tree
+The result of the call to experi() includes the attributes pr and test if the number of classes is two and keep=TRUE. We can thus use this to generate a risk chart for the last of the models built in the experiment.
+
+```{r}
+ex <- ex.rp
+pr <- attr(ex, "pr")
+test <- attr(ex, "test")
+riskchart(pr, ds[test, target], ds[test, risk])
+```
+
+## Step 7: Experiment - RiskChart Random Forest
+
+```{r}
+ex <- ex.rf
+pr <- attr(ex, "pr")
+test <- attr(ex, "test")
+riskchart(pr, ds[test, target], ds[test, risk])
+```
+
+## Step 7: Experiment - RiskChart Ada Boost
+
+```{r}
+ex <- ex.ad
+pr <- attr(ex, "pr")
+test <- attr(ex, "test")
+riskchart(pr, ds[test, target], ds[test, risk])
+```
+
+## Step 7: Experiment - RiskChart Conditional Tree
+
+```{r}
+ex <- ex.ct
+pr <- attr(ex, "pr")
+test <- attr(ex, "test")
+riskchart(pr, ds[test, target], ds[test, risk])
+```
+
+## Step 8: Finish Up - Save Model
+We save the model, together with the dataset and other variables, into a binary R file.
+
+```{r}
+dname <- "models"
+if (! file.exists(dname)) dir.create(dname)
+time.stamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+fstem <- paste(dsname, mtype, time.stamp, sep="_")
+(fname <- file.path(dname, sprintf("%s.RData", fstem)))
+save(ds, dsname, vars, target, risk, ignore,
+     form, nobs, seed, train, test, model, mtype, pr,
+     file=fname)
+```
+
+
